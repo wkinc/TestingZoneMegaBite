@@ -6,10 +6,10 @@ import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, quer
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const app = initializeApp({
-  apiKey: 'PASTE_HERE',
-  authDomain: 'PASTE_HERE',
-  projectId: 'PASTE_HERE',
-  appId: 'PASTE_HERE',
+  apiKey: 'AIzaSyBObFzFKM93QD1fMNyZqVLj1kGYvEn0a5A',
+  authDomain: 'megabite-os-test.firebaseapp.com',
+  projectId: 'megabite-os-test',
+  appId: '1:774860936041:web:392bddcf41af80cbed63f8',
 });
 
 export const auth = getAuth(app);
