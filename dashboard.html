@@ -8,51 +8,70 @@
   <div class="ph"><div><h2>Dashboard</h2><p id="hello"></p></div></div>
   <div class="g4" id="kpi"></div>
   <div class="g2">
-    <div class="card"><h3 id="fc-title">Forecast vs actual</h3><div class="chart"><canvas id="c-fc"></canvas></div></div>
-    <div class="card"><h3>Latest orders today</h3>
-      <table><thead><tr><th>Item</th><th>Qty</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="card"><h3 id="t1">Revenue, last 7 days</h3><div class="chart"><canvas id="c-rev"></canvas></div></div>
+    <div class="card"><h3 id="t2">Sales by time slot</h3><div class="chart"><canvas id="c-slot"></canvas></div></div>
+  </div>
+  <div class="g2" style="grid-template-columns:1fr 1fr">
+    <div class="card"><h3>Top items (7 days)</h3><div id="top-items"></div></div>
+    <div class="card"><h3>Low stock</h3><table><tbody id="low"></tbody></table></div>
   </div>
 </main></div></div>
 <div class="toast" id="toast"></div>
 
 <script type="module">
-  import { db, collection, getDocs, query, where, orderBy } from './js/firebase.js';
-  import { requireLogin, loadMenu, loadLatestForecasts, $, rm, esc, STATUS } from './js/app.js';
+  import { db, collection, getDocs, query, where, orderBy, limit } from './js/firebase.js';
+  import { requireLogin, loadInventory, $, rm, esc } from './js/app.js';
 
   const { profile } = await requireLogin('dashboard');
-  const { byId } = await loadMenu();
   $('hello').textContent = 'Signed in as ' + profile.email;
 
-  // Today's orders
-  const start = new Date(); start.setHours(0, 0, 0, 0);
-  const snap = await getDocs(query(collection(db, 'orders'),
-    where('created_at', '>=', start), orderBy('created_at', 'desc')));
-  const orders = snap.docs.map((d) => d.data());
-  const revenue = orders.reduce((s, o) => s + (byId[o.item_id]?.price || 0) * o.qty, 0);
+  let revenue = '–', portions = '–', label = 'no sales data', delta = ['', ''];
+
+  // Sales: use the newest day in the data, plus the 6 days before it
+  const newest = await getDocs(query(collection(db, 'sales'), orderBy('date', 'desc'), limit(1)));
+  if (!newest.empty) {
+    const last = newest.docs[0].data().date;
+    const from = new Date(new Date(last).getTime() - 6 * 864e5).toISOString().slice(0, 10);
+    const rows = (await getDocs(query(collection(db, 'sales'), where('date', '>=', from)))).docs.map((d) => d.data());
+
+    const byDay = {}, bySlot = {}, byItem = {};
+    rows.forEach((r) => {
+      byDay[r.date] = (byDay[r.date] || 0) + r.price * r.quantity;
+      if (r.date === last) bySlot[r.time_slot] = (bySlot[r.time_slot] || 0) + r.price * r.quantity;
+      byItem[r.item_name] = (byItem[r.item_name] || 0) + r.quantity;
+    });
+    const days = Object.keys(byDay).sort();
+    const prev = byDay[days[days.length - 2]];
+    label = last; revenue = rm(byDay[last]);
+    portions = rows.filter((r) => r.date === last).reduce((s, r) => s + r.quantity, 0);
+    if (prev) { const p = Math.round((byDay[last] / prev - 1) * 100); delta = [(p >= 0 ? '▲ ' : '▼ ') + Math.abs(p) + '% vs day before', p >= 0 ? 'up' : 'dn']; }
+
+    $('t1').textContent = 'Revenue, 7 days to ' + last;
+    $('t2').textContent = 'Sales by time slot · ' + last;
+    const opts = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+    new Chart($('c-rev'), { type: 'line', options: opts, data: { labels: days.map((d) => d.slice(5)),
+      datasets: [{ data: days.map((d) => byDay[d]), borderColor: '#B85C38', backgroundColor: '#B85C3822', fill: true, tension: .4 }] } });
+    const slots = ['Morning', 'Lunch', 'Tea', 'Dinner'];
+    new Chart($('c-slot'), { type: 'bar', options: opts, data: { labels: slots,
+      datasets: [{ data: slots.map((s) => bySlot[s] || 0), backgroundColor: '#C9A961', borderRadius: 6 }] } });
+
+    const items = Object.entries(byItem).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    $('top-items').innerHTML = items.map(([n, q], i) => `<div class="rank"><em>${i + 1}</em>
+      <div>${esc(n)}<div class="bar"><i style="width:${q / items[0][1] * 100}%"></i></div></div><b>${q}</b></div>`).join('');
+  }
+
+  // Open orders and low stock
+  const open = (await getDocs(query(collection(db, 'orders'), where('status', 'in', ['new', 'preparing'])))).size;
+  const low = (await loadInventory()).filter((i) => i.stock <= i.reorder_level);
 
   $('kpi').innerHTML = [
-    ['💰', "Today's revenue", rm(revenue)],
-    ['🧾', 'Order lines today', orders.length],
-    ['👨‍🍳', 'Still in the kitchen', orders.filter((o) => o.status !== 'done').length],
-    ['📖', 'Menu items', Object.keys(byId).length],
-  ].map((k) => `<div class="card kpi"><div class="e">${k[0]}</div><div><small>${k[1]}</small><b>${k[2]}</b></div></div>`).join('');
+    ['💰', 'Revenue · ' + label, revenue, delta[0], delta[1]],
+    ['🍽️', 'Portions sold', portions, '', ''],
+    ['👨‍🍳', 'Open orders', open, '', ''],
+    ['📦', 'Low-stock items', low.length, low.length ? 'Check inventory' : 'All OK', low.length ? 'dn' : 'up'],
+  ].map((k) => `<div class="card kpi"><div class="e">${k[0]}</div><div><small>${k[1]}</small><b>${k[2]}</b><span class="${k[4]}">${k[3]}</span></div></div>`).join('');
 
-  $('rows').innerHTML = orders.slice(0, 6).map((o) => {
-    const s = STATUS[o.status] || [o.status, 'off'];
-    return `<tr><td>${esc(byId[o.item_id]?.name || 'Item ' + o.item_id)}</td><td>×${o.qty}</td><td><span class="b ${s[1]}">${s[0]}</span></td></tr>`;
-  }).join('') || '<tr><td colspan="3" class="empty">No orders today.</td></tr>';
-
-  // Forecast vs actual (latest date)
-  const { date, rows } = await loadLatestForecasts();
-  if (date) {
-    $('fc-title').textContent = 'Forecast vs actual · ' + date;
-    const agg = {};
-    rows.forEach((r) => { const a = (agg[r.item_id] ||= { p: 0, a: 0 }); a.p += r.predicted || 0; a.a += r.actual || 0; });
-    const ids = Object.keys(agg);
-    new Chart($('c-fc'), { type: 'bar', options: { responsive: true, maintainAspectRatio: false },
-      data: { labels: ids.map((i) => byId[i]?.name || i), datasets: [
-        { label: 'Predicted', data: ids.map((i) => agg[i].p), backgroundColor: '#C9A961', borderRadius: 6 },
-        { label: 'Actual', data: ids.map((i) => agg[i].a), backgroundColor: '#B85C38', borderRadius: 6 }] } });
-  }
+  $('low').innerHTML = low.map((i) => `<tr><td>${esc(i.name)}</td><td>${i.stock} ${esc(i.unit)}</td><td><span class="b bad">Low</span></td></tr>`).join('')
+    || '<tr><td class="empty">All stock levels are OK.</td></tr>';
 </script>
 </body></html>
