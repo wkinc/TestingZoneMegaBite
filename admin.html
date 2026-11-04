@@ -8,11 +8,10 @@
   <div class="g4" id="kpi"></div>
   <div class="card"><h3>Users</h3>
     <table><thead><tr><th>Email</th><th>Role</th><th>User ID</th></tr></thead><tbody id="rows"></tbody></table></div>
+  <div class="card" style="margin-top:18px"><h3>Recent activity</h3>
+    <table><thead><tr><th>Action</th><th>By</th><th>Details</th><th>When</th></tr></thead><tbody id="audit"></tbody></table></div>
 </main></div></div>
 <div class="toast" id="toast"></div>
-
-  <div class="card" style="margin-top:18px"><h3>Recent activity</h3>
-  <table><thead><tr><th>Action</th><th>By</th><th>Details</th><th>When</th></tr></thead><tbody id="audit"></tbody></table></div>
 
 <script type="module">
   import { db, collection, getDocs, getCountFromServer, query, orderBy, limit } from './js/firebase.js';
@@ -31,7 +30,7 @@
   const logs = await getDocs(query(collection(db, 'audit_logs'), orderBy('created_at', 'desc'), limit(10)));
   $('audit').innerHTML = logs.docs.map((d) => { const a = d.data();
     return `<tr><td>${esc(a.action)}</td><td>${esc(a.by)}</td><td>${esc(a.file || a.collection || '')}</td>
-      <td><small>${a.created_at?.toDate().toLocaleString('en-MY') || ''}</small></td></tr>`; }).join('')
+        <td><small>${a.created_at?.toDate().toLocaleString('en-MY') || ''}</small></td></tr>`; }).join('')
     || '<tr><td colspan="4" class="empty">No activity yet.</td></tr>';
 </script>
 </body>
