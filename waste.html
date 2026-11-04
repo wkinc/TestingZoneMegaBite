@@ -9,43 +9,59 @@
     <div class="card"><h3>Log waste</h3>
       <label for="item">Item</label><select id="item"></select>
       <label for="qty">Portions</label><input id="qty" type="number" min="1" value="1">
+      <label for="meal">Meal</label><select id="meal"><option>Lunch</option><option>Dinner</option></select>
       <label for="why">Reason</label>
-      <select id="why"><option>Expired</option><option>Overprepared</option><option>Spoiled</option><option>Dropped</option><option>Other</option></select>
+      <select id="why"><option>overproduction</option><option>spoiled</option><option>returned</option><option>other</option></select>
       <button class="btn pri" style="width:100%;margin-top:16px" id="save">Save</button></div>
     <div class="card"><h3>Recent waste <small id="total" style="font-weight:400;color:var(--mute)"></small></h3>
-      <table><thead><tr><th>When</th><th>Item</th><th>Qty</th><th>Reason</th><th>Cost</th><th>By</th></tr></thead>
+      <table><thead><tr><th>Date</th><th>Meal</th><th>Item</th><th>Qty</th><th>Reason</th><th>Cost</th><th></th></tr></thead>
       <tbody id="rows"></tbody></table></div>
   </div>
 </main></div></div>
 <div class="toast" id="toast"></div>
 
 <script type="module">
-  import { db, collection, doc, setDoc, getDocs, query, orderBy, limit, serverTimestamp } from './js/firebase.js';
-  import { requireLogin, loadMenu, $, rm, esc, toast } from './js/app.js';
+  import { db, collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, limit } from './js/firebase.js';
+  import { requireLogin, loadMenu, today, $, rm, esc, toast } from './js/app.js';
 
-  const { user } = await requireLogin('waste');
+  const { role } = await requireLogin('waste');
   const { list, byId } = await loadMenu();
+  const recipes = {};
+  (await getDocs(collection(db, 'recipes'))).forEach((d) => recipes[d.id] = d.data());
   $('item').innerHTML = list.map((m) => `<option value="${m.item_id}">${esc(m.name)}</option>`).join('');
+  const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
 
   async function load() {                       // PULL
-    const snap = await getDocs(query(collection(db, 'waste_log'), orderBy('created_at', 'desc'), limit(30)));
+    const snap = await getDocs(query(collection(db, 'waste_logs'), orderBy('date', 'desc'), limit(40)));
     let sum = 0;
     $('rows').innerHTML = snap.docs.map((d) => {
-      const w = d.data(); sum += w.cost || 0;
-      const when = w.created_at?.toDate().toLocaleDateString('en-MY', { day: 'numeric', month: 'short' }) || 'now';
-      return `<tr><td>${when}</td><td>${esc(w.item_name)}</td><td>${w.qty}</td><td>${esc(w.reason)}</td><td>${rm(w.cost)}</td><td><small>${esc(w.by)}</small></td></tr>`;
-    }).join('') || '<tr><td colspan="6" class="empty">Nothing logged yet.</td></tr>';
-    $('total').textContent = '· ' + rm(sum) + ' in total';
+      const w = d.data(), m = byId[w.item_id] || {};
+      const cost = w.waste_cost ?? w.qty * (m.cost_per_portion || 0);   // older rows have no waste_cost
+      sum += cost;
+      return `<tr><td>${esc(w.date)}</td><td>${esc(w.meal)}</td><td>${esc(w.item_name || m.name || 'Item ' + w.item_id)}</td>
+        <td>${w.qty}</td><td>${esc(w.reason)}</td><td>${rm(cost)}</td>
+        <td>${role === 'admin' ? `<button class="btn dng sm" data-del="${d.id}">Delete</button>` : ''}</td></tr>`;
+    }).join('') || '<tr><td colspan="7" class="empty">Nothing logged yet.</td></tr>';
+    $('total').textContent = '· ' + rm(sum) + ' in the latest ' + snap.size;
   }
 
   $('save').onclick = async () => {             // PUSH
     const m = byId[$('item').value], qty = Number($('qty').value);
     if (!(qty > 0)) return toast('Enter a quantity');
     try {
-      await setDoc(doc(collection(db, 'waste_log')), { item_id: m.item_id, item_name: m.name, qty,
-        reason: $('why').value, cost: (m.cost_per_portion || 0) * qty, by: user.email, created_at: serverTimestamp() });
+      await setDoc(doc(collection(db, 'waste_logs')), {
+        date: today(), meal: $('meal').value, item_id: m.item_id, qty, reason: $('why').value,
+        item_name: m.name, unit: 'portion', waste_cost: round(qty * (m.cost_per_portion || 0), 2),
+        ingredient_waste: (recipes[m.item_id]?.ingredients || []).map((i) => ({ id: i.id, qty: round(qty * i.qty, 3), unit: i.unit })),
+        logged_by: role });
       toast('Waste logged'); load();
     } catch { toast('Could not save'); }
+  };
+
+  $('rows').onclick = async (e) => {            // admin only (rules enforce this)
+    const b = e.target.closest('[data-del]');
+    if (!b || !confirm('Delete this entry?')) return;
+    try { await deleteDoc(doc(db, 'waste_logs', b.dataset.del)); load(); } catch { toast('Could not delete'); }
   };
   load();
 </script>
