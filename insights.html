@@ -4,7 +4,8 @@
 <body>
 <div id="app"><header class="top" id="top"></header>
 <div class="body"><nav class="side" id="side"></nav><main>
-  <div class="ph"><div><h2>AI insights</h2><p id="sub">Loading forecasts…</p></div></div>
+  <div class="ph"><div><h2>AI insights</h2><p id="sub">Prep forecast by day and meal.</p></div></div>
+  <div class="tabs" id="dtabs"></div>
   <div class="tabs" id="tabs"></div>
   <div class="card"><table><thead><tr><th>Item</th><th>Predicted (range)</th><th>Prep</th><th>Actual</th><th>Decision</th></tr></thead>
     <tbody id="rows"></tbody></table></div>
@@ -12,26 +13,26 @@
 <div class="toast" id="toast"></div>
 
 <script type="module">
-  import { db, collection, doc, setDoc, getDocs, query, where, serverTimestamp } from './js/firebase.js';
-  import { requireLogin, loadMenu, loadLatestForecasts, $, esc, toast } from './js/app.js';
+  import { db, collection, doc, setDoc, getDocs, serverTimestamp } from './js/firebase.js';
+  import { requireLogin, loadMenu, $, esc, toast } from './js/app.js';
 
   const { user } = await requireLogin('insights');
   const { byId } = await loadMenu();
-  const { date, rows } = await loadLatestForecasts();
+  const rows = (await getDocs(collection(db, 'forecasts'))).docs.map((d) => ({ id: d.id, ...d.data() }));
+  const decisions = {};
+  (await getDocs(collection(db, 'prep_decisions'))).forEach((d) => decisions[d.id] = d.data());
 
-  if (!date) {
+  if (!rows.length) {
     $('sub').textContent = 'No forecasts yet. Run seed.js first.';
   } else {
-    $('sub').textContent = 'Forecast for ' + date;
-    const decisions = {};
-    (await getDocs(query(collection(db, 'prep_decisions'), where('date', '==', date))))
-      .forEach((d) => decisions[d.id] = d.data());
-    const meals = [...new Set(rows.map((r) => r.meal))];
-    let meal = meals[0];
+    const dates = [...new Set(rows.map((r) => r.date))].sort();
+    const meals = ['Lunch', 'Dinner'].filter((m) => rows.some((r) => r.meal === m));
+    let date = dates[dates.length - 1], meal = meals[0];
 
     const draw = () => {
-      $('tabs').innerHTML = meals.map((m) => `<button class="${m === meal ? 'on' : ''}" data-m="${esc(m)}">${esc(m)}</button>`).join('');
-      $('rows').innerHTML = rows.filter((r) => r.meal === meal).map((r) => {
+      $('dtabs').innerHTML = dates.map((d) => `<button class="${d === date ? 'on' : ''}" data-d="${d}">${d.slice(5)}</button>`).join('');
+      $('tabs').innerHTML = meals.map((m) => `<button class="${m === meal ? 'on' : ''}" data-m="${m}">${m}</button>`).join('');
+      $('rows').innerHTML = rows.filter((r) => r.date === date && r.meal === meal).map((r) => {
         const d = decisions[r.id];
         const qty = d ? (d.action === 'rejected' ? '–' : d.qty) : (r.recommended_prep ?? '–');
         const act = d ? `<span class="b ${d.action === 'rejected' ? 'bad' : 'paid'}">${d.action}</span>`
@@ -45,13 +46,14 @@
 
     document.addEventListener('click', async (e) => {
       const t = e.target.closest('button'); if (!t) return;
+      if (t.dataset.d) { date = t.dataset.d; return draw(); }
       if (t.dataset.m) { meal = t.dataset.m; return draw(); }
       if (!t.dataset.a) return;
       const r = rows.find((x) => x.id === t.dataset.id);
       let qty = r.recommended_prep;
       if (t.dataset.a === 'modified') { qty = Number(prompt('New prep quantity', qty)); if (!(qty > 0)) return; }
       if (t.dataset.a === 'rejected') qty = null;
-      const data = { forecast_id: r.id, date, meal: r.meal, item_id: r.item_id,
+      const data = { forecast_id: r.id, date: r.date, meal: r.meal, item_id: r.item_id,
         action: t.dataset.a, qty, by: user.email, at: serverTimestamp() };
       try { await setDoc(doc(db, 'prep_decisions', r.id), data); decisions[r.id] = data; draw(); toast('Saved'); }
       catch { toast('Could not save'); }
