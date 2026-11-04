@@ -28,9 +28,9 @@ const NAV = {
 export function requireLogin(page) {
   return new Promise((resolve) => {
     onAuthStateChanged(auth, async (user) => {
-      if (!user) return location.replace('login.html');
+      if (!user) return location.replace('index.html');
       const role = (await user.getIdTokenResult()).claims.role;
-      if (!ROLE_PAGES[role]) { await signOut(auth); return location.replace('login.html'); }
+      if (!ROLE_PAGES[role]) { await signOut(auth); return location.replace('index.html'); }
       if (!ROLE_PAGES[role].includes(page)) return location.replace(HOME[role]);
       const snap = await getDoc(doc(db, 'users', user.uid));          // grab this account's profile
       const profile = snap.exists() ? snap.data() : { email: user.email, role };
@@ -49,7 +49,7 @@ function drawShell(page, user, role) {
     <button class="btn sec sm" id="out" style="color:#fff;border-color:#fff">Log out</button>`;
   $('side').innerHTML = ROLE_PAGES[role].map((p) =>
     `<a href="${p}.html" class="${p === page ? 'on' : ''}"><span>${NAV[p][0]}</span>${NAV[p][1]}</a>`).join('');
-  $('out').onclick = async () => { await signOut(auth); location.href = 'login.html'; };
+  $('out').onclick = async () => { await signOut(auth); location.href = 'index.html'; };
   $('app').style.display = 'block';   // show the page only after the login check passes
 }
 
