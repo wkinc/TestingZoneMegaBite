@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MegaBite OS · Inventory</title><link rel="stylesheet" href="css/style.css"></head>
+<body>
+<div id="app"><header class="top" id="top"></header>
+<div class="body"><nav class="side" id="side"></nav><main>
+  <div class="ph"><div><h2>Inventory</h2><p>Stock levels and how many portions you can still make.</p></div></div>
+  <div class="g2">
+    <div class="card"><h3>Ingredients</h3>
+      <table><thead><tr><th>Ingredient</th><th>Stock</th><th>Reorder at</th><th>Cost / unit</th><th>Status</th><th></th></tr></thead>
+      <tbody id="rows"></tbody></table></div>
+    <div class="card"><h3>Servings from current stock</h3>
+      <ul class="rcp" id="cap"></ul>
+      <p id="note" style="color:var(--mute);margin-top:10px;font-size:13px"></p></div>
+  </div>
+</main></div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { db, collection, doc, updateDoc, getDocs } from './js/firebase.js';
+  import { requireLogin, loadInventory, $, rm, esc, toast } from './js/app.js';
+
+  const { role } = await requireLogin('inventory');
+  const canEdit = role !== 'kitchen';
+  const inv = await loadInventory();
+  const recipes = (await getDocs(collection(db, 'recipes'))).docs.map((d) => d.data()).sort((a, b) => a.item_id - b.item_id);
+  if (recipes.some((r) => r.verified === false)) $('note').textContent = 'Recipe amounts are placeholders until they are verified.';
+
+  function draw() {
+    $('rows').innerHTML = inv.map((i) => {
+      const low = i.stock <= i.reorder_level;
+      return `<tr data-id="${i.id}"><td><b>${esc(i.name)}</b></td>
+        <td>${canEdit ? `<input type="number" min="0" step="any" value="${i.stock}">` : i.stock} ${esc(i.unit)}</td>
+        <td>${i.reorder_level} ${esc(i.unit)}</td><td>${rm(i.cost_per_unit)}</td>
+        <td><span class="b ${low ? 'bad' : 'paid'}">${low ? 'Low stock' : 'OK'}</span></td>
+        <td>${canEdit ? '<button class="btn sec sm" data-save>Save</button>' : ''}</td></tr>`;
+    }).join('');
+
+    $('cap').innerHTML = recipes.map((r) => {
+      let best = Infinity, lim = '';
+      r.ingredients.forEach((g) => {
+        const n = Math.floor((inv.find((x) => x.id === g.id)?.stock ?? 0) / g.qty);
+        if (n < best) { best = n; lim = g.id; }
+      });
+      const limName = inv.find((x) => x.id === lim)?.name || lim;
+      return `<li><span>${esc(r.name)}</span><b>${best} <small style="color:var(--mute);font-weight:400">(limited by ${esc(limName)})</small></b></li>`;
+    }).join('');
+  }
+
+  $('rows').onclick = async (e) => {            // PUSH: update stock
+    if (!e.target.closest('[data-save]')) return;
+    const tr = e.target.closest('tr'), v = Number(tr.querySelector('input').value);
+    if (!(v >= 0)) return toast('Enter 0 or more');
+    try {
+      await updateDoc(doc(db, 'inventory', tr.dataset.id), { stock: v });
+      inv.find((x) => x.id === tr.dataset.id).stock = v;
+      draw(); toast('Stock saved');
+    } catch { toast('Could not save'); }
+  };
+  draw();
+</script>
+</body></html>
