@@ -1,5 +1,4 @@
-import { auth, db, onAuthStateChanged, signOut, doc, getDoc, collection, getDocs,
-  query, where, orderBy, limit } from './firebase.js';
+import { auth, db, onAuthStateChanged, signOut, doc, getDoc, collection, getDocs } from './firebase.js';
 
 export const $ = (id) => document.getElementById(id);
 export const rm = (n) => 'RM ' + Number(n || 0).toFixed(2);
@@ -8,19 +7,25 @@ export const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
 export const icon = (m) => m.emoji || '🍽️';
 export const STATUS = { new: ['New', 'bad'], preparing: ['Preparing', 'prep'], done: ['Done', 'done'] };
 
+// today as YYYY-MM-DD in local time
+export const today = () => {
+  const d = new Date();
+  return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+
 export function toast(t) {
   const e = $('toast'); e.textContent = t; e.classList.add('on');
   clearTimeout(e.t); e.t = setTimeout(() => e.classList.remove('on'), 2500);
 }
 
 export const ROLE_PAGES = {
-  admin:   ['dashboard', 'orders', 'menu', 'waste', 'insights', 'account', 'admin'],
-  manager: ['dashboard', 'orders', 'menu', 'waste', 'insights', 'account'],
-  kitchen: ['orders', 'waste', 'insights', 'account'],
+  admin:   ['dashboard', 'orders', 'menu', 'inventory', 'waste', 'insights', 'account', 'admin'],
+  manager: ['dashboard', 'orders', 'menu', 'inventory', 'waste', 'insights', 'account'],
+  kitchen: ['orders', 'inventory', 'waste', 'insights', 'account'],
 };
 export const HOME = { admin: 'dashboard.html', manager: 'dashboard.html', kitchen: 'orders.html' };
 const NAV = {
-  dashboard: ['🏠', 'Dashboard'], orders: ['🧾', 'Orders'], menu: ['📖', 'Menu'],
+  dashboard: ['🏠', 'Dashboard'], orders: ['🧾', 'Orders'], menu: ['📖', 'Menu'], inventory: ['📦', 'Inventory'],
   waste: ['🗑️', 'Waste'], insights: ['✨', 'AI Insights'], account: ['⚙️', 'Account'], admin: ['🏢', 'Platform'],
 };
 
@@ -59,11 +64,7 @@ export async function loadMenu() {
   return { list, byId: Object.fromEntries(list.map((m) => [m.item_id, m])) };
 }
 
-// Forecasts for the newest date in the collection
-export async function loadLatestForecasts() {
-  const top = await getDocs(query(collection(db, 'forecasts'), orderBy('date', 'desc'), limit(1)));
-  if (top.empty) return { date: null, rows: [] };
-  const date = top.docs[0].data().date;
-  const snap = await getDocs(query(collection(db, 'forecasts'), where('date', '==', date)));
-  return { date, rows: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+export async function loadInventory() {
+  const snap = await getDocs(collection(db, 'inventory'));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name));
 }
