@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MegaBite OS · Waste</title><link rel="stylesheet" href="css/style.css"></head>
+<body>
+<div id="app"><header class="top" id="top"></header>
+<div class="body"><nav class="side" id="side"></nav><main>
+  <div class="ph"><div><h2>Waste</h2><p>Log what gets thrown away and see what it costs.</p></div></div>
+  <div class="g2" style="grid-template-columns:1fr 2fr">
+    <div class="card"><h3>Log waste</h3>
+      <label for="item">Item</label><select id="item"></select>
+      <label for="qty">Portions</label><input id="qty" type="number" min="1" value="1">
+      <label for="why">Reason</label>
+      <select id="why"><option>Expired</option><option>Overprepared</option><option>Spoiled</option><option>Dropped</option><option>Other</option></select>
+      <button class="btn pri" style="width:100%;margin-top:16px" id="save">Save</button></div>
+    <div class="card"><h3>Recent waste <small id="total" style="font-weight:400;color:var(--mute)"></small></h3>
+      <table><thead><tr><th>When</th><th>Item</th><th>Qty</th><th>Reason</th><th>Cost</th><th>By</th></tr></thead>
+      <tbody id="rows"></tbody></table></div>
+  </div>
+</main></div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { db, collection, doc, setDoc, getDocs, query, orderBy, limit, serverTimestamp } from './js/firebase.js';
+  import { requireLogin, loadMenu, $, rm, esc, toast } from './js/app.js';
+
+  const { user } = await requireLogin('waste');
+  const { list, byId } = await loadMenu();
+  $('item').innerHTML = list.map((m) => `<option value="${m.item_id}">${esc(m.name)}</option>`).join('');
+
+  async function load() {                       // PULL
+    const snap = await getDocs(query(collection(db, 'waste_log'), orderBy('created_at', 'desc'), limit(30)));
+    let sum = 0;
+    $('rows').innerHTML = snap.docs.map((d) => {
+      const w = d.data(); sum += w.cost || 0;
+      const when = w.created_at?.toDate().toLocaleDateString('en-MY', { day: 'numeric', month: 'short' }) || 'now';
+      return `<tr><td>${when}</td><td>${esc(w.item_name)}</td><td>${w.qty}</td><td>${esc(w.reason)}</td><td>${rm(w.cost)}</td><td><small>${esc(w.by)}</small></td></tr>`;
+    }).join('') || '<tr><td colspan="6" class="empty">Nothing logged yet.</td></tr>';
+    $('total').textContent = '· ' + rm(sum) + ' in total';
+  }
+
+  $('save').onclick = async () => {             // PUSH
+    const m = byId[$('item').value], qty = Number($('qty').value);
+    if (!(qty > 0)) return toast('Enter a quantity');
+    try {
+      await setDoc(doc(collection(db, 'waste_log')), { item_id: m.item_id, item_name: m.name, qty,
+        reason: $('why').value, cost: (m.cost_per_portion || 0) * qty, by: user.email, created_at: serverTimestamp() });
+      toast('Waste logged'); load();
+    } catch { toast('Could not save'); }
+  };
+  load();
+</script>
+</body></html>

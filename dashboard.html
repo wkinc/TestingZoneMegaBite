@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MegaBite OS · Dashboard</title><link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script></head>
+<body>
+<div id="app"><header class="top" id="top"></header>
+<div class="body"><nav class="side" id="side"></nav><main>
+  <div class="ph"><div><h2>Dashboard</h2><p id="hello"></p></div></div>
+  <div class="g4" id="kpi"></div>
+  <div class="g2">
+    <div class="card"><h3 id="fc-title">Forecast vs actual</h3><div class="chart"><canvas id="c-fc"></canvas></div></div>
+    <div class="card"><h3>Latest orders today</h3>
+      <table><thead><tr><th>Item</th><th>Qty</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
+  </div>
+</main></div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { db, collection, getDocs, query, where, orderBy } from './js/firebase.js';
+  import { requireLogin, loadMenu, loadLatestForecasts, $, rm, esc, STATUS } from './js/app.js';
+
+  const { profile } = await requireLogin('dashboard');
+  const { byId } = await loadMenu();
+  $('hello').textContent = 'Signed in as ' + profile.email;
+
+  // Today's orders
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const snap = await getDocs(query(collection(db, 'orders'),
+    where('created_at', '>=', start), orderBy('created_at', 'desc')));
+  const orders = snap.docs.map((d) => d.data());
+  const revenue = orders.reduce((s, o) => s + (byId[o.item_id]?.price || 0) * o.qty, 0);
+
+  $('kpi').innerHTML = [
+    ['💰', "Today's revenue", rm(revenue)],
+    ['🧾', 'Order lines today', orders.length],
+    ['👨‍🍳', 'Still in the kitchen', orders.filter((o) => o.status !== 'done').length],
+    ['📖', 'Menu items', Object.keys(byId).length],
+  ].map((k) => `<div class="card kpi"><div class="e">${k[0]}</div><div><small>${k[1]}</small><b>${k[2]}</b></div></div>`).join('');
+
+  $('rows').innerHTML = orders.slice(0, 6).map((o) => {
+    const s = STATUS[o.status] || [o.status, 'off'];
+    return `<tr><td>${esc(byId[o.item_id]?.name || 'Item ' + o.item_id)}</td><td>×${o.qty}</td><td><span class="b ${s[1]}">${s[0]}</span></td></tr>`;
+  }).join('') || '<tr><td colspan="3" class="empty">No orders today.</td></tr>';
+
+  // Forecast vs actual (latest date)
+  const { date, rows } = await loadLatestForecasts();
+  if (date) {
+    $('fc-title').textContent = 'Forecast vs actual · ' + date;
+    const agg = {};
+    rows.forEach((r) => { const a = (agg[r.item_id] ||= { p: 0, a: 0 }); a.p += r.predicted || 0; a.a += r.actual || 0; });
+    const ids = Object.keys(agg);
+    new Chart($('c-fc'), { type: 'bar', options: { responsive: true, maintainAspectRatio: false },
+      data: { labels: ids.map((i) => byId[i]?.name || i), datasets: [
+        { label: 'Predicted', data: ids.map((i) => agg[i].p), backgroundColor: '#C9A961', borderRadius: 6 },
+        { label: 'Actual', data: ids.map((i) => agg[i].a), backgroundColor: '#B85C38', borderRadius: 6 }] } });
+  }
+</script>
+</body></html>

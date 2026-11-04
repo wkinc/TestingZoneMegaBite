@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MegaBite OS · Orders</title><link rel="stylesheet" href="css/style.css"></head>
+<body>
+<div id="app"><header class="top" id="top"></header>
+<div class="body"><nav class="side" id="side"></nav><main>
+  <div class="ph"><h2>Orders</h2><div class="sp"></div><span class="b prep" id="cc"></span></div>
+  <div class="pos" id="pos">
+    <div>
+      <div class="items" id="grid"></div>
+      <div class="card" style="margin-top:20px"><h3>Live orders</h3>
+        <table><thead><tr><th>Item</th><th>Meal</th><th>Total</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rows"></tbody></table></div>
+    </div>
+    <div class="card cart" id="cart"><h3>Current order</h3>
+      <label for="meal" style="margin-top:0">Meal</label>
+      <select id="meal"><option>Lunch</option><option>Dinner</option></select>
+      <div id="lines"></div>
+      <div class="tot" style="margin-top:10px"><span>Subtotal</span><span id="sub">RM 0.00</span></div>
+      <div class="tot"><span>Tax (6%)</span><span id="tax">RM 0.00</span></div>
+      <div class="tot g"><span>Total</span><span id="tot">RM 0.00</span></div>
+      <button class="btn pri" style="width:100%;margin-top:12px" id="send">Send to kitchen</button>
+    </div>
+  </div>
+</main></div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { db, collection, doc, updateDoc, query, orderBy, limit, onSnapshot, writeBatch, serverTimestamp } from './js/firebase.js';
+  import { requireLogin, loadMenu, $, rm, esc, icon, toast, STATUS } from './js/app.js';
+
+  const { user, role } = await requireLogin('orders');
+  const { list, byId } = await loadMenu();
+  const NEXT = { new: 'preparing', preparing: 'done' };
+  const canSell = role !== 'kitchen';
+
+  if (!canSell) {                       // kitchen: queue only
+    $('grid').remove(); $('cart').remove(); $('pos').style.gridTemplateColumns = '1fr';
+  } else {
+    let cart = {};
+    $('meal').value = new Date().getHours() < 16 ? 'Lunch' : 'Dinner';
+    $('grid').innerHTML = list.map((m) => `<button class="item" data-id="${m.item_id}">
+      <div class="im">${icon(m)}</div><div class="t"><b>${esc(m.name)}</b><span>${rm(m.price)}</span></div></button>`).join('');
+
+    const renderCart = () => {
+      let s = 0;
+      const ids = Object.keys(cart);
+      $('lines').innerHTML = ids.length ? ids.map((id) => {
+        const m = byId[id], q = cart[id]; s += (m.price || 0) * q;
+        return `<div class="line"><span>${icon(m)}</span><span class="n">${esc(m.name)} ×${q}</span><b>${rm((m.price || 0) * q)}</b>
+          <button class="x" data-rem="${id}" aria-label="Remove">✕</button></div>`;
+      }).join('') : '<div class="empty">Tap an item to start an order.</div>';
+      $('sub').textContent = rm(s); $('tax').textContent = rm(s * 0.06); $('tot').textContent = rm(s * 1.06);
+    };
+    $('grid').onclick = (e) => { const b = e.target.closest('.item'); if (!b) return; cart[b.dataset.id] = (cart[b.dataset.id] || 0) + 1; renderCart(); };
+    $('lines').onclick = (e) => { const b = e.target.closest('[data-rem]'); if (!b) return; delete cart[b.dataset.rem]; renderCart(); };
+
+    $('send').onclick = async () => {           // PUSH: one order doc per cart line
+      const ids = Object.keys(cart);
+      if (!ids.length) return toast('Add at least one item first');
+      const batch = writeBatch(db), ref = crypto.randomUUID().slice(0, 8);
+      ids.forEach((id) => batch.set(doc(collection(db, 'orders')), {
+        item_id: Number(id), qty: cart[id], meal: $('meal').value, status: 'new',
+        order_ref: ref, created_by: user.uid, created_at: serverTimestamp() }));
+      try { await batch.commit(); cart = {}; renderCart(); toast('Order sent to the kitchen'); }
+      catch { toast('You cannot create orders'); }
+    };
+    renderCart();
+  }
+
+  // PULL (live): the table updates by itself when anyone changes an order
+  onSnapshot(query(collection(db, 'orders'), orderBy('created_at', 'desc'), limit(30)), (snap) => {
+    $('cc').textContent = snap.docs.filter((d) => d.data().status !== 'done').length + ' open';
+    $('rows').innerHTML = snap.docs.map((d) => {
+      const o = d.data(), m = byId[o.item_id] || {}, s = STATUS[o.status] || [o.status, 'off'], next = NEXT[o.status];
+      return `<tr><td>${esc(m.name || 'Item ' + o.item_id)} ×${o.qty}</td><td>${esc(o.meal)}</td><td>${rm((m.price || 0) * o.qty)}</td>
+        <td><span class="b ${s[1]}">${s[0]}</span></td>
+        <td>${next ? `<button class="btn sec sm" data-id="${d.id}" data-next="${next}">Mark ${next}</button>` : ''}</td></tr>`;
+    }).join('');
+  });
+  $('rows').onclick = async (e) => {            // PUSH: update status
+    const b = e.target.closest('button[data-id]'); if (!b) return;
+    try { await updateDoc(doc(db, 'orders', b.dataset.id), { status: b.dataset.next }); }
+    catch { toast('Could not update the order'); }
+  };
+</script>
+</body></html>

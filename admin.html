@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MegaBite OS · Platform</title><link rel="stylesheet" href="css/style.css"></head>
+<body>
+<div id="app"><header class="top" id="top"></header>
+<div class="body"><nav class="side" id="side"></nav><main>
+  <div class="ph"><div><h2>Platform overview</h2><p>Users and data in your Firebase project.</p></div></div>
+  <div class="g4" id="kpi"></div>
+  <div class="card"><h3>Users</h3>
+    <table><thead><tr><th>Email</th><th>Role</th><th>User ID</th></tr></thead><tbody id="rows"></tbody></table></div>
+</main></div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { db, collection, getDocs, getCountFromServer } from './js/firebase.js';
+  import { requireLogin, $, esc } from './js/app.js';
+
+  await requireLogin('admin');
+  const users = await getDocs(collection(db, 'users'));
+  $('rows').innerHTML = users.docs.map((d) => { const u = d.data();
+    return `<tr><td>${esc(u.email)}</td><td><span class="b prep">${esc(u.role)}</span></td><td><small>${d.id}</small></td></tr>`; }).join('');
+
+  const names = ['menu_items', 'forecasts', 'orders', 'waste_log'];
+  const counts = await Promise.all(names.map(async (c) => (await getCountFromServer(collection(db, c))).data().count));
+  $('kpi').innerHTML = names.map((n, i) =>
+    `<div class="card kpi"><div><small>${n}</small><b>${counts[i]}</b></div></div>`).join('');
+</script>
+</body></html>

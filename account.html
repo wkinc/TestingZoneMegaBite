@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MegaBite OS · Account</title><link rel="stylesheet" href="css/style.css"></head>
+<body>
+<div id="app"><header class="top" id="top"></header>
+<div class="body"><nav class="side" id="side"></nav><main>
+  <div class="ph"><div><h2>Account</h2><p>Your sign-in details and access.</p></div></div>
+  <div class="card" style="max-width:520px"><h3>Profile</h3><div id="kv"></div>
+    <button class="btn sec" style="margin-top:14px" id="reset">Send password reset email</button></div>
+</main></div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { auth, sendPasswordResetEmail } from './js/firebase.js';
+  import { requireLogin, ROLE_PAGES, $, esc, toast } from './js/app.js';
+
+  const { user, role, profile } = await requireLogin('account');
+  $('kv').innerHTML = [['Email', profile.email], ['Role', role], ['User ID', user.uid], ['Pages you can open', ROLE_PAGES[role].join(', ')]]
+    .map((r) => `<div class="kv"><span>${r[0]}</span><b>${esc(r[1])}</b></div>`).join('');
+  $('reset').onclick = async () => { await sendPasswordResetEmail(auth, user.email); toast('Reset email sent'); };
+</script>
+</body></html>
