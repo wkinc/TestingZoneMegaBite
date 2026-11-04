@@ -11,8 +11,11 @@
 </main></div></div>
 <div class="toast" id="toast"></div>
 
+  <div class="card" style="margin-top:18px"><h3>Recent activity</h3>
+  <table><thead><tr><th>Action</th><th>By</th><th>Details</th><th>When</th></tr></thead><tbody id="audit"></tbody></table></div>
+
 <script type="module">
-  import { db, collection, getDocs, getCountFromServer } from './js/firebase.js';
+  import { db, collection, getDocs, getCountFromServer, query, orderBy, limit } from './js/firebase.js';
   import { requireLogin, $, esc } from './js/app.js';
 
   await requireLogin('admin');
@@ -20,9 +23,16 @@
   $('rows').innerHTML = users.docs.map((d) => { const u = d.data();
     return `<tr><td>${esc(u.email)}</td><td><span class="b prep">${esc(u.role)}</span></td><td><small>${d.id}</small></td></tr>`; }).join('');
 
-  const names = ['menu_items', 'forecasts', 'orders', 'waste_log'];
+  const names = ['menu_items', 'forecasts', 'sales', 'orders', 'waste_logs', 'inventory'];
   const counts = await Promise.all(names.map(async (c) => (await getCountFromServer(collection(db, c))).data().count));
   $('kpi').innerHTML = names.map((n, i) =>
     `<div class="card kpi"><div><small>${n}</small><b>${counts[i]}</b></div></div>`).join('');
+
+  const logs = await getDocs(query(collection(db, 'audit_logs'), orderBy('created_at', 'desc'), limit(10)));
+  $('audit').innerHTML = logs.docs.map((d) => { const a = d.data();
+    return `<tr><td>${esc(a.action)}</td><td>${esc(a.by)}</td><td>${esc(a.file || a.collection || '')}</td>
+      <td><small>${a.created_at?.toDate().toLocaleString('en-MY') || ''}</small></td></tr>`; }).join('')
+    || '<tr><td colspan="4" class="empty">No activity yet.</td></tr>';
 </script>
-</body></html>
+</body>
+</html>
