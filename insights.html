@@ -26,7 +26,7 @@
     $('sub').textContent = 'No forecasts yet. Run seed.js first.';
   } else {
     const dates = [...new Set(rows.map((r) => r.date))].sort();
-    const meals = ['Lunch', 'Dinner'].filter((m) => rows.some((r) => r.meal === m));
+        const meals = ['Morning', 'Lunch', 'Tea', 'Dinner'].filter((m) => rows.some((r) => r.meal === m));
     let date = dates[dates.length - 1], meal = meals[0];
 
     const draw = () => {
