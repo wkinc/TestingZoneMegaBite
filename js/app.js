@@ -1,4 +1,4 @@
-import { auth, db, onAuthStateChanged, signOut, doc, getDoc, collection, getDocs } from './firebase.js';
+import { auth, db, onAuthStateChanged, signOut, doc, getDoc, setDoc, serverTimestamp, collection, getDocs } from './firebase.js';
 
 export const $ = (id) => document.getElementById(id);
 export const rm = (n) => 'RM ' + Number(n || 0).toFixed(2);
@@ -67,4 +67,12 @@ export async function loadMenu() {
 export async function loadInventory() {
   const snap = await getDocs(collection(db, 'inventory'));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Writes one line to audit_logs. It never blocks the page if it fails.
+export async function logAudit(user, role, action, detail = {}) {
+  try {
+    await setDoc(doc(collection(db, 'audit_logs')),
+      { action, by: user.email, role, ...detail, created_at: serverTimestamp() });
+  } catch (e) { console.warn('audit log failed', e); }
 }

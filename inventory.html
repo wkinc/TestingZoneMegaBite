@@ -18,23 +18,31 @@
 
 <script type="module">
   import { db, collection, doc, updateDoc, getDocs } from './js/firebase.js';
-  import { requireLogin, loadInventory, $, rm, esc, toast } from './js/app.js';
+  import { requireLogin, loadInventory, logAudit, $, rm, esc, toast } from './js/app.js';
 
-  const { role } = await requireLogin('inventory');
+  const { user, role } = await requireLogin('inventory');
   const canEdit = role !== 'kitchen';
   const inv = await loadInventory();
   const recipes = (await getDocs(collection(db, 'recipes'))).docs.map((d) => d.data()).sort((a, b) => a.item_id - b.item_id);
   if (recipes.some((r) => r.verified === false)) $('note').textContent = 'Recipe amounts are placeholders until they are verified.';
 
+  const ORDER = ['Essentials', 'Vegetables', 'Protein', 'Grains & staples', 'Sauces & dairy'];
+  const pos = (g) => (ORDER.includes(g) ? ORDER.indexOf(g) : 99);
+
+  function row(i) {
+    const low = i.stock <= i.reorder_level;
+    return `<tr data-id="${i.id}"><td><b>${esc(i.name)}</b></td>
+      <td>${canEdit ? `<input type="number" min="0" step="any" value="${i.stock}">` : i.stock} ${esc(i.unit)}</td>
+      <td>${i.reorder_level} ${esc(i.unit)}</td><td>${rm(i.cost_per_unit)}</td>
+      <td><span class="b ${low ? 'bad' : 'paid'}">${low ? 'Low stock' : 'OK'}</span></td>
+      <td>${canEdit ? '<button class="btn sec sm" data-save>Save</button>' : ''}</td></tr>`;
+  }
+
   function draw() {
-    $('rows').innerHTML = inv.map((i) => {
-      const low = i.stock <= i.reorder_level;
-      return `<tr data-id="${i.id}"><td><b>${esc(i.name)}</b></td>
-        <td>${canEdit ? `<input type="number" min="0" step="any" value="${i.stock}">` : i.stock} ${esc(i.unit)}</td>
-        <td>${i.reorder_level} ${esc(i.unit)}</td><td>${rm(i.cost_per_unit)}</td>
-        <td><span class="b ${low ? 'bad' : 'paid'}">${low ? 'Low stock' : 'OK'}</span></td>
-        <td>${canEdit ? '<button class="btn sec sm" data-save>Save</button>' : ''}</td></tr>`;
-    }).join('');
+    const groups = {};
+    inv.forEach((i) => (groups[i.category || 'Other'] ||= []).push(i));
+    $('rows').innerHTML = Object.entries(groups).sort((a, b) => pos(a[0]) - pos(b[0])).map(([g, items]) =>
+      `<tr><td colspan="6" style="background:var(--cream2);font-weight:600">${esc(g)}</td></tr>` + items.map(row).join('')).join('');
 
     $('cap').innerHTML = recipes.map((r) => {
       let best = Infinity, lim = '';
@@ -54,6 +62,7 @@
     try {
       await updateDoc(doc(db, 'inventory', tr.dataset.id), { stock: v });
       inv.find((x) => x.id === tr.dataset.id).stock = v;
+      logAudit(user, role, 'stock_updated', { collection: 'inventory', item: tr.dataset.id, stock: v });
       draw(); toast('Stock saved');
     } catch { toast('Could not save'); }
   };

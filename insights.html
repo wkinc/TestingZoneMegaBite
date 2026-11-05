@@ -14,9 +14,9 @@
 
 <script type="module">
   import { db, collection, doc, setDoc, getDocs, serverTimestamp } from './js/firebase.js';
-  import { requireLogin, loadMenu, $, esc, toast } from './js/app.js';
+  import { requireLogin, loadMenu, logAudit, $, esc, toast } from './js/app.js';
 
-  const { user } = await requireLogin('insights');
+  const { user, role } = await requireLogin('insights');
   const { byId } = await loadMenu();
   const rows = (await getDocs(collection(db, 'forecasts'))).docs.map((d) => ({ id: d.id, ...d.data() }));
   const decisions = {};
@@ -55,8 +55,11 @@
       if (t.dataset.a === 'rejected') qty = null;
       const data = { forecast_id: r.id, date: r.date, meal: r.meal, item_id: r.item_id,
         action: t.dataset.a, qty, by: user.email, at: serverTimestamp() };
-      try { await setDoc(doc(db, 'prep_decisions', r.id), data); decisions[r.id] = data; draw(); toast('Saved'); }
-      catch { toast('Could not save'); }
+      try {
+        await setDoc(doc(db, 'prep_decisions', r.id), data);
+        decisions[r.id] = data; draw(); toast('Saved');
+        logAudit(user, role, 'prep_decision', { collection: 'prep_decisions', item_id: r.item_id, decision: t.dataset.a, qty });
+      } catch { toast('Could not save'); }
     });
     draw();
   }

@@ -20,9 +20,9 @@
 
 <script type="module">
   import { db, doc, setDoc, updateDoc } from './js/firebase.js';
-  import { requireLogin, loadMenu, $, rm, esc, icon, toast } from './js/app.js';
+  import { requireLogin, loadMenu, logAudit, $, esc, icon, toast } from './js/app.js';
 
-  await requireLogin('menu');
+  const { user, role } = await requireLogin('menu');
   const { list } = await loadMenu();
   const field = (m, f, step) => `<input type="number" step="${step}" data-f="${f}" value="${m[f] ?? ''}">`;
 
@@ -37,8 +37,11 @@
     if (!e.target.closest('[data-save]')) return;
     const tr = e.target.closest('tr'), upd = {};
     tr.querySelectorAll('input').forEach((i) => upd[i.dataset.f] = i.value === '' ? null : Number(i.value));
-    try { await updateDoc(doc(db, 'menu_items', tr.dataset.id), upd); toast('Saved'); }
-    catch { toast('Could not save'); }
+    try {
+      await updateDoc(doc(db, 'menu_items', tr.dataset.id), upd);
+      logAudit(user, role, 'menu_updated', { collection: 'menu_items', item_id: Number(tr.dataset.id) });
+      toast('Saved');
+    } catch { toast('Could not save'); }
   };
 
   $('add').onclick = async () => {              // PUSH: new item (same shape as seed.js)
@@ -48,6 +51,7 @@
       await setDoc(doc(db, 'menu_items', String(id)), { item_id: id, name,
         price: Number($('p').value) || null, cost_per_portion: Number($('c').value) || null,
         standard_prep_qty: Number($('q').value) || null });
+      await logAudit(user, role, 'menu_item_added', { collection: 'menu_items', item_id: id });
       location.reload();
     } catch { toast('Could not add the item'); }
   };

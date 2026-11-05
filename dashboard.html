@@ -6,6 +6,7 @@
 <div id="app"><header class="top" id="top"></header>
 <div class="body"><nav class="side" id="side"></nav><main>
   <div class="ph"><div><h2>Dashboard</h2><p id="hello"></p></div></div>
+  <div class="banner hide" id="why" style="margin-bottom:18px"><span>💡</span><div><b id="why-t"></b><p id="why-p"></p></div></div>
   <div class="g4" id="kpi"></div>
   <div class="g2">
     <div class="card"><h3 id="t1">Revenue, last 7 days</h3><div class="chart"><canvas id="c-rev"></canvas></div></div>
@@ -19,8 +20,35 @@
 <div class="toast" id="toast"></div>
 
 <script type="module">
-  import { db, collection, getDocs, query, where, orderBy, limit } from './js/firebase.js';
+  import { db, collection, doc, getDoc, getDocs, query, where, orderBy, limit } from './js/firebase.js';
   import { requireLogin, loadInventory, $, rm, esc } from './js/app.js';
+
+  // Explain the change in plain words: biggest item changes + calendar facts
+  function why(rows, last, prev, calLast, calPrev) {
+    const byKey = (d) => {
+      const m = {};
+      rows.filter((r) => r.date === d).forEach((r) => {
+        const k = r.item_name + ' at ' + r.time_slot.toLowerCase();
+        m[k] = (m[k] || 0) + r.price * r.quantity;
+      });
+      return m;
+    };
+    const a = byKey(last), b = byKey(prev);
+    const diffs = [...new Set([...Object.keys(a), ...Object.keys(b)])].map((k) => [k, (a[k] || 0) - (b[k] || 0)]);
+    const up = diffs.reduce((s, d) => s + d[1], 0) >= 0;
+    const top = diffs.filter((d) => (up ? d[1] > 0 : d[1] < 0))
+      .sort((x, y) => (up ? y[1] - x[1] : x[1] - y[1])).slice(0, 2);
+    const out = [];
+    if (top.length) out.push('Biggest ' + (up ? 'gains' : 'drops') + ': ' +
+      top.map((t) => `${t[0]} (${t[1] >= 0 ? '+' : '−'}${rm(Math.abs(t[1]))})`).join(' and ') + '.');
+    const reasons = [];
+    if (calLast?.rain && !calPrev?.rain) reasons.push('it rained');
+    if (calLast?.promotion && !calPrev?.promotion) reasons.push('there was a promotion');
+    if (calLast?.holiday && !calPrev?.holiday) reasons.push('it was a public holiday');
+    if (calLast?.is_weekend && !calPrev?.is_weekend) reasons.push('it was a weekend');
+    if (reasons.length) out.push('Possible reasons: ' + reasons.join(', ') + '.');
+    return out.join(' ');
+  }
 
   const { profile } = await requireLogin('dashboard');
   $('hello').textContent = 'Signed in as ' + profile.email;
@@ -41,10 +69,22 @@
       byItem[r.item_name] = (byItem[r.item_name] || 0) + r.quantity;
     });
     const days = Object.keys(byDay).sort();
-    const prev = byDay[days[days.length - 2]];
+    const prevDate = days[days.length - 2];
     label = last; revenue = rm(byDay[last]);
     portions = rows.filter((r) => r.date === last).reduce((s, r) => s + r.quantity, 0);
-    if (prev) { const p = Math.round((byDay[last] / prev - 1) * 100); delta = [(p >= 0 ? '▲ ' : '▼ ') + Math.abs(p) + '% vs day before', p >= 0 ? 'up' : 'dn']; }
+
+    if (prevDate) {
+      const pct = Math.round((byDay[last] / byDay[prevDate] - 1) * 100);
+      delta = [(pct >= 0 ? '▲ ' : '▼ ') + Math.abs(pct) + '% vs day before', pct >= 0 ? 'up' : 'dn'];
+      const calOf = async (d) => {
+        try { const s = await getDoc(doc(db, 'calendar_context', d)); return s.exists() ? s.data() : null; }
+        catch { return null; }
+      };
+      const [cl, cp] = await Promise.all([calOf(last), calOf(prevDate)]);
+      $('why-t').textContent = `Revenue went ${pct >= 0 ? 'up' : 'down'} ${Math.abs(pct)}% compared with ${prevDate} (${rm(byDay[last])} vs ${rm(byDay[prevDate])})`;
+      $('why-p').textContent = why(rows, last, prevDate, cl, cp);
+      $('why').classList.remove('hide');
+    }
 
     $('t1').textContent = 'Revenue, 7 days to ' + last;
     $('t2').textContent = 'Sales by time slot · ' + last;

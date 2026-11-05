@@ -11,38 +11,91 @@
       <label for="qty">Portions</label><input id="qty" type="number" min="1" value="1">
       <label for="meal">Meal</label><select id="meal"><option>Lunch</option><option>Dinner</option></select>
       <label for="why">Reason</label>
-      <select id="why"><option>overproduction</option><option>spoiled</option><option>returned</option><option>other</option></select>
+      <select id="why"><option>overproduction</option><option>expired</option><option>spoiled</option><option>damaged</option><option>returned</option><option>other</option></select>
       <button class="btn pri" style="width:100%;margin-top:16px" id="save">Save</button></div>
     <div class="card"><h3>Recent waste <small id="total" style="font-weight:400;color:var(--mute)"></small></h3>
       <table><thead><tr><th>Date</th><th>Meal</th><th>Item</th><th>Qty</th><th>Reason</th><th>Cost</th><th></th></tr></thead>
       <tbody id="rows"></tbody></table></div>
   </div>
+  <div class="g2" style="grid-template-columns:1fr 1fr;margin-top:18px">
+    <div class="card"><h3>Waste rate by item</h3><div id="rate"></div>
+      <p id="rate-note" style="color:var(--mute);font-size:13px;margin-top:8px"></p></div>
+    <div class="card"><h3>Most wasted ingredients</h3><div id="ing"></div></div>
+  </div>
 </main></div></div>
 <div class="toast" id="toast"></div>
 
 <script type="module">
-  import { db, collection, doc, setDoc, deleteDoc, getDocs, query, orderBy, limit } from './js/firebase.js';
-  import { requireLogin, loadMenu, today, $, rm, esc, toast } from './js/app.js';
+  import { db, collection, doc, setDoc, deleteDoc, getDocs, query, where, orderBy, limit } from './js/firebase.js';
+  import { requireLogin, loadMenu, loadInventory, logAudit, today, $, rm, esc, toast } from './js/app.js';
 
-  const { role } = await requireLogin('waste');
+  const { user, role } = await requireLogin('waste');
   const { list, byId } = await loadMenu();
+  const names = Object.fromEntries((await loadInventory()).map((i) => [i.id, i.name]));
   const recipes = {};
   (await getDocs(collection(db, 'recipes'))).forEach((d) => recipes[d.id] = d.data());
   $('item').innerHTML = list.map((m) => `<option value="${m.item_id}">${esc(m.name)}</option>`).join('');
   const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
+  const day = (s, n) => new Date(new Date(s).getTime() + n * 864e5).toISOString().slice(0, 10);
+
+  // Portions sold per item between two dates. If there are no sales for those dates,
+  // estimate from the average of the last 28 days of sales.
+  async function soldByItem(from, to) {
+    const sum = async (a, b) => {
+      const m = {};
+      (await getDocs(query(collection(db, 'sales'), where('date', '>=', a), where('date', '<=', b))))
+        .forEach((d) => { const s = d.data(); m[s.item_id] = (m[s.item_id] || 0) + s.quantity; });
+      return m;
+    };
+    const m = await sum(from, to);
+    if (Object.keys(m).length) return { m, est: false };
+    const newest = (await getDocs(query(collection(db, 'sales'), orderBy('date', 'desc'), limit(1)))).docs[0]?.data().date;
+    if (!newest) return { m: {}, est: true };
+    const base = await sum(day(newest, -27), newest);
+    const days = (new Date(to) - new Date(from)) / 864e5 + 1;
+    Object.keys(base).forEach((k) => base[k] = base[k] / 28 * days);
+    return { m: base, est: true };
+  }
+
+  async function insights(logs) {
+    if (!logs.length) { $('rate').innerHTML = $('ing').innerHTML = '<div class="empty">No data yet.</div>'; return; }
+    const dates = logs.map((w) => w.date).sort();
+    const { m: sold, est } = await soldByItem(dates[0], dates[dates.length - 1]);
+    const wasted = {}, ing = {};
+    logs.forEach((w) => {
+      wasted[w.item_id] = (wasted[w.item_id] || 0) + w.qty;
+      (recipes[w.item_id]?.ingredients || []).forEach((i) => {
+        const e = (ing[i.id] ||= { qty: 0, times: 0, unit: i.unit });
+        e.qty += w.qty * i.qty; e.times++;
+      });
+    });
+    const rates = Object.entries(wasted)
+      .map(([id, q]) => [byId[id]?.name || id, q / ((sold[id] || 0) + q) * 100, q])
+      .sort((a, b) => b[1] - a[1]);
+    $('rate').innerHTML = rates.map(([n, p, q]) => `<div class="rank"><div>${esc(n)} <small>${q} wasted</small>
+      <div class="bar"><i style="width:${p / rates[0][1] * 100}%"></i></div></div><b>${p.toFixed(1)}%</b></div>`).join('');
+    $('rate-note').textContent = est
+      ? 'Waste rate = wasted ÷ (sold + wasted). Sold portions are estimated, because there are no sales for these dates.'
+      : 'Waste rate = wasted ÷ (sold + wasted) for the dates shown.';
+    $('ing').innerHTML = Object.entries(ing).sort((a, b) => b[1].times - a[1].times || b[1].qty - a[1].qty).slice(0, 5)
+      .map(([id, e], i) => `<div class="rank"><em>${i + 1}</em><div>${esc(names[id] || id)}<br><small>in ${e.times} waste entries</small></div>
+        <b>${round(e.qty, 2)} ${esc(e.unit)}</b></div>`).join('');
+  }
 
   async function load() {                       // PULL
     const snap = await getDocs(query(collection(db, 'waste_logs'), orderBy('date', 'desc'), limit(40)));
+    const logs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     let sum = 0;
-    $('rows').innerHTML = snap.docs.map((d) => {
-      const w = d.data(), m = byId[w.item_id] || {};
+    $('rows').innerHTML = logs.map((w) => {
+      const m = byId[w.item_id] || {};
       const cost = w.waste_cost ?? w.qty * (m.cost_per_portion || 0);   // older rows have no waste_cost
       sum += cost;
       return `<tr><td>${esc(w.date)}</td><td>${esc(w.meal)}</td><td>${esc(w.item_name || m.name || 'Item ' + w.item_id)}</td>
         <td>${w.qty}</td><td>${esc(w.reason)}</td><td>${rm(cost)}</td>
-        <td>${role === 'admin' ? `<button class="btn dng sm" data-del="${d.id}">Delete</button>` : ''}</td></tr>`;
+        <td>${role === 'admin' ? `<button class="btn dng sm" data-del="${w.id}">Delete</button>` : ''}</td></tr>`;
     }).join('') || '<tr><td colspan="7" class="empty">Nothing logged yet.</td></tr>';
-    $('total').textContent = '· ' + rm(sum) + ' in the latest ' + snap.size;
+    $('total').textContent = '· ' + rm(sum) + ' in the latest ' + logs.length;
+    await insights(logs);
   }
 
   $('save').onclick = async () => {             // PUSH
@@ -54,6 +107,7 @@
         item_name: m.name, unit: 'portion', waste_cost: round(qty * (m.cost_per_portion || 0), 2),
         ingredient_waste: (recipes[m.item_id]?.ingredients || []).map((i) => ({ id: i.id, qty: round(qty * i.qty, 3), unit: i.unit })),
         logged_by: role });
+      logAudit(user, role, 'waste_logged', { collection: 'waste_logs', item_id: m.item_id, qty });
       toast('Waste logged'); load();
     } catch { toast('Could not save'); }
   };
@@ -61,7 +115,11 @@
   $('rows').onclick = async (e) => {            // admin only (rules enforce this)
     const b = e.target.closest('[data-del]');
     if (!b || !confirm('Delete this entry?')) return;
-    try { await deleteDoc(doc(db, 'waste_logs', b.dataset.del)); load(); } catch { toast('Could not delete'); }
+    try {
+      await deleteDoc(doc(db, 'waste_logs', b.dataset.del));
+      logAudit(user, role, 'waste_deleted', { collection: 'waste_logs' });
+      load();
+    } catch { toast('Could not delete'); }
   };
   load();
 </script>

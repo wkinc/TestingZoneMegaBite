@@ -27,7 +27,7 @@
 
 <script type="module">
   import { db, collection, doc, updateDoc, query, orderBy, limit, onSnapshot, writeBatch, serverTimestamp } from './js/firebase.js';
-  import { requireLogin, loadMenu, $, rm, esc, icon, toast, STATUS } from './js/app.js';
+  import { requireLogin, loadMenu, logAudit, $, rm, esc, icon, toast, STATUS } from './js/app.js';
 
   const { user, role } = await requireLogin('orders');
   const { list, byId } = await loadMenu();
@@ -62,8 +62,11 @@
       ids.forEach((id) => batch.set(doc(collection(db, 'orders')), {
         item_id: Number(id), qty: cart[id], meal: $('meal').value, status: 'new',
         order_ref: ref, created_by: user.uid, created_at: serverTimestamp() }));
-      try { await batch.commit(); cart = {}; renderCart(); toast('Order sent to the kitchen'); }
-      catch { toast('You cannot create orders'); }
+      try {
+        await batch.commit();
+        logAudit(user, role, 'order_created', { collection: 'orders', order_ref: ref, lines: ids.length });
+        cart = {}; renderCart(); toast('Order sent to the kitchen');
+      } catch { toast('You cannot create orders'); }
     };
     renderCart();
   }
@@ -80,8 +83,10 @@
   });
   $('rows').onclick = async (e) => {            // PUSH: update status
     const b = e.target.closest('button[data-id]'); if (!b) return;
-    try { await updateDoc(doc(db, 'orders', b.dataset.id), { status: b.dataset.next }); }
-    catch { toast('Could not update the order'); }
+    try {
+      await updateDoc(doc(db, 'orders', b.dataset.id), { status: b.dataset.next });
+      logAudit(user, role, 'order_status', { collection: 'orders', order: b.dataset.id, status: b.dataset.next });
+    } catch { toast('Could not update the order'); }
   };
 </script>
 </body></html>
