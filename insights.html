@@ -1,12 +1,23 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MegaBite OS · AI Insights</title><link rel="stylesheet" href="css/style.css"></head>
+<title>MegaBite OS · AI Insights</title><link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script></head>
 <body>
 <div id="app"><header class="top" id="top"></header>
 <div class="body"><nav class="side" id="side"></nav><main>
   <div class="ph"><div><h2>AI insights</h2><p id="sub">Prep forecast by day and meal.</p></div></div>
   <div class="tabs" id="dtabs"></div>
   <div class="tabs" id="tabs"></div>
+
+  <div class="card" style="padding:16px;margin-bottom:16px">
+    <h3 style="margin:0 0 8px">Forecast by meal time</h3>
+    <canvas id="chartMeal" height="110"></canvas>
+  </div>
+  <div class="card" style="padding:16px;margin-bottom:16px">
+    <h3 style="margin:0 0 8px">Forecast by item</h3>
+    <canvas id="chartItem" height="110"></canvas>
+  </div>
+
   <div class="card"><table><thead><tr><th>Item</th><th>Predicted (range)</th><th>Prep</th><th>Actual</th><th>Decision</th></tr></thead>
     <tbody id="rows"></tbody></table></div>
 </main></div></div>
@@ -24,11 +35,64 @@
 
   if (!rows.length) {
     $('sub').textContent = 'No forecasts yet. Run seed.js first.';
+    document.querySelectorAll('canvas').forEach((c) => c.closest('.card').style.display = 'none');
   } else {
     const dates = [...new Set(rows.map((r) => r.date))].sort();
-        const meals = ['Morning', 'Lunch', 'Tea', 'Dinner'].filter((m) => rows.some((r) => r.meal === m));
+    const meals = ['Morning', 'Lunch', 'Tea', 'Dinner'].filter((m) => rows.some((r) => r.meal === m));
     let date = dates[dates.length - 1], meal = meals[0];
 
+    // ---------- charts ----------
+    const charts = {};
+    const makeChart = (id, cfg) => { charts[id]?.destroy(); charts[id] = new Chart($(id), cfg); };
+    const sum = (list, k) => list.some((r) => r[k] != null)
+      ? list.reduce((s, r) => s + Number(r[k] || 0), 0) : null;
+
+    const drawCharts = () => {
+      if (!window.Chart) return;
+      const day = rows.filter((r) => r.date === date);
+
+      // Chart 1: total portions per meal time for the selected date
+      const perMeal = meals.map((m) => day.filter((r) => r.meal === m));
+      makeChart('chartMeal', {
+        type: 'bar',
+        data: {
+          labels: meals,
+          datasets: [
+            { label: 'Predicted', data: perMeal.map((l) => sum(l, 'predicted')), backgroundColor: '#4f8cff' },
+            { label: 'Actual', data: perMeal.map((l) => sum(l, 'actual')), backgroundColor: '#34c38f' },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'bottom' } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: 'Portions' } } },
+        },
+      });
+
+      // Chart 2: each item for the selected date and meal, with the forecast range
+      const list = day.filter((r) => r.meal === meal);
+      const name = (r) => byId[r.item_id]?.name || 'Item ' + r.item_id;
+      makeChart('chartItem', {
+        data: {
+          labels: list.map(name),
+          datasets: [
+            { type: 'bar', label: 'Predicted', data: list.map((r) => r.predicted ?? null), backgroundColor: '#4f8cff' },
+            { type: 'bar', label: 'Actual', data: list.map((r) => r.actual ?? null), backgroundColor: '#34c38f' },
+            { type: 'line', label: 'Upper', data: list.map((r) => r.upper ?? null), showLine: false,
+              pointStyle: 'triangle', pointRadius: 5, borderColor: '#f59e0b', backgroundColor: '#f59e0b' },
+            { type: 'line', label: 'Lower', data: list.map((r) => r.lower ?? null), showLine: false,
+              pointStyle: 'rectRot', pointRadius: 5, borderColor: '#ef4444', backgroundColor: '#ef4444' },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'bottom' } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: 'Portions' } } },
+        },
+      });
+    };
+
+    // ---------- table + tabs ----------
     const draw = () => {
       $('dtabs').innerHTML = dates.map((d) => `<button class="${d === date ? 'on' : ''}" data-d="${d}">${d.slice(5)}</button>`).join('');
       $('tabs').innerHTML = meals.map((m) => `<button class="${m === meal ? 'on' : ''}" data-m="${m}">${m}</button>`).join('');
@@ -42,8 +106,10 @@
           <td>${r.predicted ?? '–'} <small>(${r.lower ?? '–'} to ${r.upper ?? '–'})</small></td>
           <td><b>${qty}</b></td><td>${r.actual ?? '–'}</td><td>${act}</td></tr>`;
       }).join('');
+      drawCharts();
     };
 
+    // ---------- clicks ----------
     document.addEventListener('click', async (e) => {
       const t = e.target.closest('button'); if (!t) return;
       if (t.dataset.d) { date = t.dataset.d; return draw(); }
