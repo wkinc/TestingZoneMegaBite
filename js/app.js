@@ -76,3 +76,23 @@ export async function logAudit(user, role, action, detail = {}) {
       { action, by: user.email, role, ...detail, created_at: serverTimestamp() });
   } catch (e) { console.warn('audit log failed', e); }
 }
+
+// ---------- menu import helpers ----------
+// "$12.50", "RM 12.5", "12,50" -> 12.5 (or null if there is no number)
+export const parsePrice = (s) => {
+  const m = String(s ?? '').replace(/,/g, '.').match(/(\d+(?:\.\d{1,2})?)/);
+  return m ? Number(m[1]) : null;
+};
+
+// Rows without a price are headings: they become the category of the rows below them.
+export function groupRows(rows) {
+  let category = 'Other';
+  const items = [];
+  rows.forEach((r) => {
+    const name = String(r.name ?? '').trim();
+    const price = parsePrice(r.price);
+    if (price === null) { if (name) category = name; return; }
+    items.push({ ...r, name, price, category });
+  });
+  return items;
+}
