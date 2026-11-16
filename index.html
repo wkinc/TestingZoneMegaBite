@@ -19,11 +19,6 @@
     <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">
     <div class="err" id="err"></div>
     <button class="btn pri" id="go">Log in</button>
-    <div class="hint"><b>Test accounts</b> (click to fill, remove before going live)<br>
-      <button class="btn sec sm" style="width:auto;margin:6px 6px 0 0" data-e="admin@test.com">Admin</button>
-      <button class="btn sec sm" style="width:auto;margin:6px 6px 0 0" data-e="manager@test.com">Manager</button>
-      <button class="btn sec sm" style="width:auto;margin:6px 0 0" data-e="kitchen@test.com">Kitchen</button><br>
-      Password: <code>Test1234!</code></div>
   </div></div>
 </section>
 
@@ -31,10 +26,6 @@
   import { auth, signInWithEmailAndPassword } from './js/firebase.js';
   import { HOME } from './js/app.js';
   const $ = (id) => document.getElementById(id);
-
-  document.querySelectorAll('[data-e]').forEach((b) => b.onclick = () => {
-    $('em').value = b.dataset.e; $('pw').value = 'Test1234!';
-  });
 
   async function login() {
     $('err').textContent = '';
