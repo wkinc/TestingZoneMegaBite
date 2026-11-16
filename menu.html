@@ -80,7 +80,7 @@ DRINKS
 Teh Tarik $3.50
 Kopi O $3.00`;
 
-  const have = new Set(list.map((m) => m.name.trim().toLowerCase()));
+  const have = new Set(list.map((m) => String(m.name ?? '').trim().toLowerCase()));
   let fresh = [];
 
   // one line -> { name, price } ; price is null for heading lines
@@ -136,3 +136,5 @@ Kopi O $3.00`;
       setTimeout(() => location.reload(), 800);
     } catch { toast('Could not import'); }
   };
+</script>
+</body></html>
