@@ -15,12 +15,26 @@
       <label for="q">Standard prep qty</label><input id="q" type="number">
       <button class="btn pri" style="width:100%;margin-top:16px" id="add">Add to menu</button></div>
   </div>
+
+  <div class="card" style="margin-top:16px"><h3>Import menu from text</h3>
+    <p style="color:var(--mute);font-size:13px;margin:0 0 10px">Paste the menu text (or choose a .txt / .csv file). Prices can have "$" or "RM". Lines without a price are used as categories.</p>
+    <textarea id="imp" rows="7" style="width:100%" placeholder="RICE DISHES&#10;Chicken Rice $8.00&#10;DRINKS&#10;Teh Tarik RM 3.50"></textarea>
+    <div style="margin:10px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input type="file" id="file" accept=".txt,.csv,text/plain,text/csv">
+      <button class="btn sec sm" id="ex">Use example</button>
+      <button class="btn pri sm" id="prev">Preview</button>
+    </div>
+    <table id="ptable" style="display:none"><thead><tr><th>Item</th><th>Category</th><th>Price (RM)</th><th>Result</th></tr></thead>
+      <tbody id="prows"></tbody></table>
+    <p id="pnote" style="color:var(--mute);font-size:13px;margin:10px 0"></p>
+    <button class="btn pri" id="save" style="display:none">Import new items</button>
+  </div>
 </main></div></div>
 <div class="toast" id="toast"></div>
 
 <script type="module">
-  import { db, doc, setDoc, updateDoc } from './js/firebase.js';
-  import { requireLogin, loadMenu, logAudit, $, esc, icon, toast } from './js/app.js';
+  import { db, doc, setDoc, updateDoc, writeBatch } from './js/firebase.js';
+  import { requireLogin, loadMenu, logAudit, parsePrice, groupRows, rm, $, esc, icon, toast } from './js/app.js';
 
   const { user, role } = await requireLogin('menu');
   const { list } = await loadMenu();
@@ -28,7 +42,7 @@
 
   $('rows').innerHTML = list.map((m) => {
     const margin = m.price ? Math.round((m.price - (m.cost_per_portion || 0)) / m.price * 100) + '%' : '–';
-    return `<tr data-id="${m.item_id}"><td><span class="thumb">${icon(m)}</span>${esc(m.name)}</td>
+    return `<tr data-id="${m.item_id}"><td><span class="thumb">${icon(m)}</span>${esc(m.name)}${m.category ? `<br><small style="color:var(--mute)">${esc(m.category)}</small>` : ''}</td>
       <td>${field(m, 'price', 0.1)}</td><td>${field(m, 'cost_per_portion', 0.1)}</td><td>${field(m, 'standard_prep_qty', 1)}</td>
       <td>${margin}</td><td><button class="btn sec sm" data-save>Save</button></td></tr>`;
   }).join('');
@@ -55,5 +69,70 @@
       location.reload();
     } catch { toast('Could not add the item'); }
   };
-</script>
-</body></html>
+
+  // ---------- import menu from text ----------
+  const EXAMPLE = `RICE DISHES
+Chicken Rice ........ $8.00
+Nasi Lemak - RM 7.00
+NOODLES
+Fried Mee, 9.00
+DRINKS
+Teh Tarik $3.50
+Kopi O $3.00`;
+
+  const have = new Set(list.map((m) => m.name.trim().toLowerCase()));
+  let fresh = [];
+
+  // one line -> { name, price } ; price is null for heading lines
+  function parseLines(text) {
+    return text.split(/\r?\n/)
+      .map((l) => l.replace(/^[\s*•\-–]+/, '').trim())
+      .filter(Boolean)
+      .map((line) => {
+        const m = line.match(/^(.*?)[\s.,;:\-–|]*(?:RM|\$)?\s*(\d+(?:[.,]\d{1,2})?)\s*$/i);
+        return m && m[1].trim() ? { name: m[1].trim(), price: m[2] } : { name: line.replace(/[:]+$/, '').trim(), price: null };
+      });
+  }
+
+  function preview() {
+    const items = groupRows(parseLines($('imp').value));   // removes "$"/"RM", turns headings into categories
+    const seen = new Set();
+    fresh = [];
+    $('prows').innerHTML = items.map((it) => {
+      const key = it.name.toLowerCase();
+      const dup = have.has(key) || seen.has(key);
+      seen.add(key);
+      if (!dup) fresh.push(it);
+      return `<tr><td>${esc(it.name)}</td><td>${esc(it.category)}</td><td>${rm(it.price)}</td>
+        <td><span class="b ${dup ? 'bad' : 'paid'}">${dup ? 'Already on the menu' : 'New'}</span></td></tr>`;
+    }).join('');
+    $('ptable').style.display = items.length ? '' : 'none';
+    $('pnote').textContent = items.length
+      ? `${fresh.length} new item(s), ${items.length - fresh.length} skipped. Prices are in RM.`
+      : 'Nothing found. Check that each item line ends with a price.';
+    $('save').style.display = fresh.length ? '' : 'none';
+  }
+
+  $('ex').onclick = () => { $('imp').value = EXAMPLE; preview(); };
+  $('prev').onclick = preview;
+  $('file').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    $('imp').value = await f.text(); preview();
+  };
+
+  $('save').onclick = async () => {
+    if (!fresh.length) return;
+    let id = Math.max(0, ...list.map((m) => m.item_id));
+    try {
+      const batch = writeBatch(db);
+      fresh.forEach((it) => {
+        id += 1;
+        batch.set(doc(db, 'menu_items', String(id)), { item_id: id, name: it.name, price: it.price,
+          category: it.category, cost_per_portion: null, standard_prep_qty: null });
+      });
+      await batch.commit();
+      await logAudit(user, role, 'menu_import', { collection: 'menu_items', items: fresh.length });
+      toast(`Imported ${fresh.length} item(s)`);
+      setTimeout(() => location.reload(), 800);
+    } catch { toast('Could not import'); }
+  };
